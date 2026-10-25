@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=1200">
 <title>Dexie // Monitor</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600&family=IBM+Plex+Sans:wght@300;400;500&family=IBM+Plex+Mono:wght@400&display=swap" rel="stylesheet">
 <style>
 :root{--c:#2b78e4;--tx:#1d2a3d;--dim:#56647a;--lb:var(--lb);--red:var(--red);--bd:var(--w3);--ln:var(--w2);--gl:rgba(255,255,255,.26);--w0:var(--w0);--w1:var(--w1);--w2:var(--w2);--w3:var(--w3);--fs:clamp(26px,3.7vh,36px)}
@@ -19,13 +20,16 @@ button{font:inherit;color:inherit;cursor:pointer}
 .hidden{display:none!important}
 .glass{background:var(--gl);backdrop-filter:blur(22px) saturate(1.5);-webkit-backdrop-filter:blur(22px) saturate(1.5);border:1px solid var(--bd);box-shadow:0 8px 32px rgba(40,60,100,.18),inset 0 1px 0 rgba(255,255,255,.7)}
 /* verrou */
-#lock{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px;text-align:center}
-#lock .box{display:flex;flex-direction:column;align-items:center;gap:18px;padding:34px 44px;border-radius:26px}
+#lock,#login{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px;text-align:center}
+#lock .box,#login .box{display:flex;flex-direction:column;align-items:center;gap:18px;padding:34px 44px;border-radius:26px}
 #lock svg{width:120px;height:120px}
 #lock .o{transform-origin:50% 50%;animation:spin 40s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){#lock .o{animation:none}}
-#lock h1{font-size:15px}
+#lock h1,#login h1{font-size:15px}
+#login input{width:260px}
+#login .mono{font-size:11px;color:var(--dim);letter-spacing:.12em;margin-top:-8px}
+#lmsg{min-height:20px;color:var(--red);font-size:12.5px}
 #lock .mono{font-size:11px;color:var(--dim);letter-spacing:.12em;margin-top:-8px}
 #dots{display:flex;gap:14px}#dots i{width:12px;height:12px;border:1px solid var(--tx);border-radius:50%;transition:.15s}#dots i.on{background:var(--c);border-color:var(--c)}
 #pad{display:grid;grid-template-columns:repeat(3,66px);gap:8px}
@@ -137,6 +141,15 @@ body.nofx #hud{animation:none}
   <div id="lockmsg" role="alert">Saisir le code d’autorisation</div>
 </div></section>
 
+<section id="login" class="hidden"><div class="box glass">
+  <h1>Connexion</h1>
+  <div class="mono">SYNCHRONISATION · SUPABASE</div>
+  <input id="le" type="email" placeholder="E-mail" autocomplete="username" aria-label="E-mail">
+  <input id="lp" type="password" placeholder="Mot de passe" autocomplete="current-password" aria-label="Mot de passe">
+  <button class="btn on" id="lgo" type="button">Se connecter</button>
+  <div id="lmsg" role="alert"></div>
+</div></section>
+
 <div id="app" class="hidden" style="display:contents">
 <div class="bar">
   <div class="brand">
@@ -149,7 +162,7 @@ body.nofx #hud{animation:none}
     <div class="tw"><div class="track"></div><div id="ptr"></div></div>
     <div id="msg">Aucune évaluation enregistrée aujourd’hui.</div>
   </div>
-  <div id="clock"><b id="hm"></b><span id="date"></span><br><button class="btn" id="fxb" type="button">EFFETS : ON</button></div>
+  <div id="clock"><b id="hm"></b><span id="date"></span><br><button class="btn" id="fxb" type="button">EFFETS : ON</button><small id="sync" class="mono" style="display:block;font-size:10px;margin-top:4px"></small></div>
 </div>
 <main>
   <section class="panel glass" aria-label="Moi">
@@ -189,8 +202,44 @@ const dkey=d=>new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10);
 const TODAY=dkey(new Date());
 let S;try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){}
 S=S||{days:{},rels:[]};
-// Supabase plus tard : remplacer save() et le chargement initial de S
-const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+/* ---------- Supabase ---------- */
+const SB_URL='https://bickyiuyftiqxnuwqwoh.supabase.co',SB_KEY='sb_publishable_w4H37VQmCv907BxMimgWeQ_Oq_eC2pl';
+const sb=(!/VOTRE/.test(SB_URL+SB_KEY)&&window.supabase)?supabase.createClient(SB_URL,SB_KEY):null;
+let uid=null,pushT=null,dirty=false;
+const setSync=t=>{const e=document.getElementById('sync');if(e)e.textContent=t};
+const stamp=()=>localStorage.setItem('dx_ts',new Date().toISOString());
+async function push(){
+ if(!sb||!uid||!dirty)return;
+ dirty=false;
+ const {error}=await sb.from('dexie_state').upsert({user_id:uid,data:S,updated_at:localStorage.getItem('dx_ts')||new Date().toISOString()});
+ if(error){dirty=true;setSync('SYNC ✕');console.error(error)}else setSync('SYNC ✓')}
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S));stamp()}catch(e){}
+ if(sb&&uid){dirty=true;setSync('SYNC …');clearTimeout(pushT);pushT=setTimeout(push,800)}};
+addEventListener('pagehide',push);addEventListener('online',push);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)push()});
+async function loadRemote(){
+ const {data,error}=await sb.from('dexie_state').select('data,updated_at').eq('user_id',uid).maybeSingle();
+ if(error){setSync('SYNC ✕');console.error(error);return}
+ const lt=localStorage.getItem('dx_ts');
+ if(data&&data.data&&(!lt||new Date(data.updated_at)>new Date(lt))){
+  S=data.data;S.days=S.days||{};S.rels=S.rels||[];
+  try{localStorage.setItem(KEY,JSON.stringify(S));localStorage.setItem('dx_ts',data.updated_at)}catch(e){}
+ }else{if(!lt)stamp();dirty=true;await push()}
+ setSync('SYNC ✓')}
+function askLogin(){return new Promise(res=>{
+ const L=document.getElementById('login');L.classList.remove('hidden');
+ const go=async()=>{
+  const {data,error}=await sb.auth.signInWithPassword({email:document.getElementById('le').value.trim(),password:document.getElementById('lp').value});
+  if(error){document.getElementById('lmsg').textContent='Connexion refusée.';return}
+  L.classList.add('hidden');res(data.session)};
+ document.getElementById('lgo').onclick=go;
+ document.getElementById('lp').onkeydown=e=>{if(e.key==='Enter')go()}})}
+async function gate(){
+ if(!sb)return;
+ let {data:{session}}=await sb.auth.getSession();
+ if(!session)session=await askLogin();
+ uid=session.user.id;
+ await loadRemote()}
 const day=(d=TODAY)=>S.days[d]||(S.days[d]={v:{},note:''});
 let SEL=null,ADD=false;
 
@@ -274,7 +323,7 @@ function lockTick(){const left=lk()-Date.now();
  if(left>0){const m=Math.floor(left/6e4),s=Math.floor(left%6e4/1e3);$('#lockmsg').textContent=`Trop d’essais. Réessaie dans ${m}:${String(s).padStart(2,'0')}`;return true}
  return false}
 setInterval(()=>{if(!started&&lk()&&!lockTick()){localStorage.removeItem('dx_lock');$('#lockmsg').textContent='Saisir le code d’autorisation'}},1000);
-function enter(){started=true;$('#lock').classList.add('hidden');$('#app').classList.remove('hidden');init()}
+async function enter(){started=true;$('#lock').classList.add('hidden');try{await gate()}catch(e){console.error(e);setSync('LOCAL')}$('#app').classList.remove('hidden');init()}
 function press(k){
  if(started||lockTick())return;
  if(k==='C'){buf='';dots();return}
